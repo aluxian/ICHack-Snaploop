@@ -1,0 +1,14 @@
+{
+  "name": "traound",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Alexandru Rosianu <rosian_alex@yahoo.com> (http://www.aluxian.com)",
+  "license": "ISC",
+  "dependencies": {
+    "botbuilder": "3.6.0"
+  }
+}
