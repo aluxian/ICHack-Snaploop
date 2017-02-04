@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "botbuilder": "3.6.0",
+    "clarifai": "2.1.2-dev",
     "request": "^2.79.0",
     "restify": "4.3.0"
   }
