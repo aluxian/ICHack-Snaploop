@@ -56,7 +56,8 @@ var DB = {
   currentGameTags: null,
   currentGameTagsTemp: null,
   currentGameSenderAddress: null,
-  // waitingForPic
+  playerTakingPhoto: null,
+  // lastActivityFromPlayerTakingPhoto: 0,
   players: [],
 };
 
@@ -77,6 +78,8 @@ bot.dialog('/guess', [
     if (DB.currentGameTags) {
       session.sendTyping();
       builder.Prompts.attachment(session, 'Send me a photo that looks like: ' + DB.currentGameTags.join(', '));
+    } else if (DB.playerTakingPhoto) {
+      session.send('Please wait, somebody is taking a photo right now');
     } else {
       session.endDialog();
       session.beginDialog('/guessed');
@@ -130,10 +133,23 @@ bot.dialog('/guess', [
 
 bot.dialog('/guessed', [
   function (session) {
+    // DB.lastActivityFromPlayerTakingPhoto = new Date().getTime();
+    DB.playerTakingPhoto = JSON.stringify(session.message.address);
     session.send('Now it\'s your turn to take a photo. I\'ll ask everyone else playing the game to guess!');
     builder.Prompts.attachment(session, 'Go ahead, I\'m waiting');
+
+    // var checkActivityId = null;
+    // var checkActivity = function() {
+    //   clearTimeout(checkActivityId);
+    //   checkActivityId = setTimeout(function() {
+    //
+    //   }, 3 * 60 * 1000); // 3 mins
+    // };
+    //
+    // checkActivity();
   },
   function (session, result) {
+    // DB.lastActivityFromPlayerTakingPhoto = new Date().getTime();
     session.sendTyping();
     clarifai.models.predict(Clarifai.GENERAL_MODEL, result.response[0].contentUrl).then(
       function(response) {
@@ -157,8 +173,10 @@ bot.dialog('/guessed', [
     );
   },
   function (session, result) {
+    // DB.lastActivityFromPlayerTakingPhoto = new Date().getTime();
     if (result.response) {
       // yes
+      DB.playerTakingPhoto = null;
       DB.currentGameTags = DB.currentGameTagsTemp;
       DB.currentGameTagsTemp = null;
 
