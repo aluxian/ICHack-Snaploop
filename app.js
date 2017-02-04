@@ -51,6 +51,7 @@ bot.dialog('/', [
     session.beginDialog('/guess');
   },
 ]);
+//
 
 bot.dialog('/guess', [
   function (session) {
