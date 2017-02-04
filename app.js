@@ -1,4 +1,6 @@
 const Clarifai = require('clarifai');
+const humanizeDuration = require('humanize-duration');
+const superagent = require('superagent');
 const builder = require('botbuilder');
 const restify = require('restify');
 
@@ -23,13 +25,15 @@ const bot = new builder.UniversalBot(connector);
 server.post('/api/messages', connector.listen());
 
 // Anytime the major version is incremented any existing conversations will be restarted.
-bot.use(builder.Middleware.dialogVersion({ version: 1.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: 4.0, resetCommand: /^reset/i }));
 
 const STATE = {
   currentTags: null,
   currentSender: null,
-  playerTakingPhoto: null,
+  playerTakingSnap: null,
+  gameStartedAt: null,
   players: {},
+  profiles: {},
 };
 
 bot.dialog('/', [
@@ -38,12 +42,48 @@ bot.dialog('/', [
     session.sendTyping();
     session.sendBatch();
 
-    if (STATE.currentSender.user.id === session.message.address.user.id) {
-      // this user is the current sender
-      session.send('Hang on, someone has to guess your photo');
+    const contFlow = () => {
+      const profile = STATE.profiles[session.message.address.user.id];
+      if (STATE.currentSender && STATE.currentSender.user.id === session.message.address.user.id) {
+        // this user is the current sender
+        session.send('Hang on, ' + profile.first_name + '. Someone has to guess your snap');
+      } else {
+        session.send('Hey, ' + profile.first_name + '! Let\'s play 🎮');
+        session.beginDialog('/guess');
+      }
+    };
+
+    if (STATE.profiles[session.message.address.user.id]) {
+      contFlow();
     } else {
-      session.send('Hey, let\'s play!');
-      session.beginDialog('/guess');
+      const fields = [
+        'first_name',
+        'last_name',
+        'profile_pic',
+        'gender',
+        'locale',
+        'timezone',
+      ];
+
+      superagent
+        .get('https://graph.facebook.com/v2.8/' + session.message.address.user.id)
+        .set('Accept', 'application/json')
+        .set('Content-Type', 'application/json')
+        .set('User-Agent', 'bot')
+        .query({
+          access_token: process.env.FACEBOOK_ACCESS_TOKEN,
+          fields: fields.join(','),
+        })
+        .end(function(err, res) {
+          if (err || !res.ok) {
+            console.error(err);
+            session.send('Error :X');
+          } else {
+            console.log('got body:', typeof res.body, res.body);
+            STATE.profiles[session.message.address.user.id] = res.body;
+            contFlow();
+          }
+        });
     }
   },
 ]);
@@ -53,11 +93,14 @@ bot.dialog('/guess', [
     if (STATE.currentTags) { // game in progress
       session.sendTyping();
       session.sendBatch();
-      builder.Prompts.attachment(session, 'Send me a photo that looks like: ' + displayTags(STATE.currentTags));
-    } else if (STATE.playerTakingPhoto) { // somebody else is taking a photo
-      session.send('Please wait, the game is starting');
+      const senderProfile = STATE.profiles[STATE.currentSender.user.id];
+      session.send(senderProfile.first_name + 'took a snap that looks like: ' + displayTags(STATE.currentTags));
+      builder.Prompts.attachment(session, 'Can you guess what it is?');
+    } else if (STATE.playerTakingSnap) { // somebody else is taking a snap
+      const profile = STATE.profiles[STATE.playerTakingSnap.user.id];
+      session.send('Please wait, ' + profile.first_name + ' is taking a snap');
     } else {
-      // ask to send photo
+      // ask to send snap
       session.replaceDialog('/guessed');
     }
   },
@@ -69,33 +112,66 @@ bot.dialog('/guess', [
       function(response) {
         const tags = processConcepts(response.outputs[0].data.concepts);
         if (!tags.length) {
-          session.send('Sorry, I could not identify anything in your photo. Try again');
+          session.send('Sorry, I could not identify anything in your snap. Try again');
           session.replaceDialog('/guess');
-        } else if (tagsMatch(STATE.currentTags, tags)) {
-          // notify the author of the pic
-          const msg = new builder.Message().address(STATE.currentSender).text('Somebody guessed your image!');
-          bot.send(msg, function(err) { if (err) { console.error(err); } });
+        } else {
+          const numMatches = tagMatches(STATE.currentTags, tags);
 
-          // notify everyone else
-          for (const [uid, address] of Object.entries(STATE.players)) {
-            if (uid !== session.message.address.user.id && uid !== STATE.currentSender.user.id) {
-              const msg1 = new builder.Message().address(address).text('Somebody guessed the current photo');
-              const msg2 = new builder.Message().address(address).text('Hang on, now they have to send an image');
-              bot.send(msg1, function(err) {
-                if (err) {
-                  console.error(err);
-                }
+          // guessed
+          if (numMatches >= 3) {
+            const durationStr = humanizeDuration(new Date().getTime() - STATE.gameStartedAt.getTime());
 
-                bot.send(msg2, function(err) { if (err) { console.error(err); } });
-              });
+            // notify the author of the pic
+            const currentProfile = STATE.profiles[session.message.address.user.id];
+            const genderPron = currentProfile.gender === 'male' ? 'him' : 'her';
+            const msg = new builder.Message()
+              .address(STATE.currentSender)
+              .text(currentProfile.first_name + ' guessed your snap! It took ' + genderPron + ' ' + durationStr);
+            bot.send(msg, function(err) { if (err) { console.error(err); } });
+
+            // notify everyone else
+            for (const [uid, address] of Object.entries(STATE.players)) {
+              if (uid !== session.message.address.user.id && uid !== STATE.currentSender.user.id) {
+                const msg1 = new builder.Message()
+                  .address(address)
+                  .text(currentProfile.first_name + ' guessed the current snap.' +
+                    ' It took ' + genderPron + ' ' + durationStr);
+                const msg2 = new builder.Message()
+                  .address(address)
+                  .text('Hang on, now ' + currentProfile.first_name + ' has to send a snap');
+                bot.send(msg1, function(err) {
+                  if (err) {
+                    console.error(err);
+                  }
+
+                  bot.send(msg2, function(err) { if (err) { console.error(err); } });
+                });
+              }
             }
+
+            STATE.currentTags = null;
+            STATE.currentSender = null;
+            STATE.gameStartedAt = null;
+
+            session.send('You guessed, yay! 🎊');
+            session.send('It took you ' + durationStr);
+            session.replaceDialog('/guessed');
           }
 
-          session.send('You guessed, yay! 🎊');
-          session.replaceDialog('/guessed');
-        } else {
-          session.send('No, that\'s not it');
-          session.replaceDialog('/guess');
+          if (numMatches === 2) {
+            session.send('You\'re very close! 🔥🔥🔥');
+            session.replaceDialog('/guess');
+          }
+
+          if (numMatches === 1) {
+            session.send('No, but you\'re close 🔥🔥');
+            session.replaceDialog('/guess');
+          }
+
+          if (numMatches < 1) {
+            session.send('No, that\'s not it');
+            session.replaceDialog('/guess');
+          }
         }
       },
       function(err) {
@@ -109,11 +185,11 @@ bot.dialog('/guess', [
 
 bot.dialog('/guessed', [
   function(session) {
-    STATE.playerTakingPhoto = session.message.address;
+    STATE.playerTakingSnap = session.message.address;
     session.sendTyping();
     session.sendBatch();
-    session.send('Now it\'s your turn to take a photo. I\'ll ask everyone else playing the game to guess!');
-    builder.Prompts.attachment(session, 'Go ahead, I\'m waiting');
+    session.send('Now it\'s your turn to take a snap. I\'ll ask ' + countOtherPlayers() + ' other players to guess!');
+    builder.Prompts.attachment(session, 'Use the Messenger camera to send me a photo');
   },
   function(session, result) {
     session.sendTyping();
@@ -122,7 +198,7 @@ bot.dialog('/guessed', [
       function(response) {
         const tags = processConcepts(response.outputs[0].data.concepts);
         if (!tags.length) {
-          session.send('Sorry, I could not identify anything in your photo. Try again');
+          session.send('Sorry, I could not identify anything in your snap. Try again');
           session.replaceDialog('/guessed');
         } else {
           STATE.currentTags = tags;
@@ -143,17 +219,16 @@ bot.dialog('/guessed', [
       session.sendTyping();
       session.sendBatch();
 
-      STATE.playerTakingPhoto = null;
+      STATE.playerTakingSnap = null;
       STATE.currentSender = session.message.address;
+      STATE.gameStartedAt = new Date();
 
-      session.send('Awesome! I\'ll send that to everyone playing');
+      session.send('Awesome! I\'ll send that to ' + countOtherPlayers() + ' players');
       session.endDialog();
 
       // notify other players
       for (const [uid, address] of Object.entries(STATE.players)) {
         if (uid !== session.message.address.user.id) {
-          const msg = new builder.Message().address(address).text('A new game has just started');
-          bot.send(msg, function(err) { if (err) { console.error(err); } });
           bot.beginDialog(address, '/guess');
         }
       }
@@ -185,7 +260,11 @@ function displayTags(tags) {
   return newTags.slice(0, 3).join(', ');
 }
 
-function tagsMatch(arr1, arr2) {
+function tagMatches(arr1, arr2) {
+  if (!arr1 || !arr2) {
+    return false;
+  }
+
   let numMatches = 0;
 
   // count elements in both arrays
@@ -195,5 +274,9 @@ function tagsMatch(arr1, arr2) {
     }
   }
 
-  return numMatches >= 3;
+  return numMatches;
+}
+
+function countOtherPlayers() {
+  return Object.entries(STATE.players).length - 1; // exclude the current player
 }
