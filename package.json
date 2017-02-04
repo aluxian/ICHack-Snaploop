@@ -9,6 +9,7 @@
   "author": "Alexandru Rosianu <rosian_alex@yahoo.com> (http://www.aluxian.com)",
   "license": "ISC",
   "dependencies": {
-    "botbuilder": "3.6.0"
+    "botbuilder": "3.6.0",
+    "restify": "^4.3.0"
   }
 }

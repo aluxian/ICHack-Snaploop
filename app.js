@@ -41,7 +41,7 @@ photos, videos, and location.
 -----------------------------------------------------------------------------*/
 
 var restify = require('restify');
-var builder = require('../../core/');
+var builder = require('botbuilder');
 
 //=========================================================
 // Bot Setup
@@ -74,10 +74,33 @@ bot.use(builder.Middleware.dialogVersion({ version: 1.0, resetCommand: /^reset/i
 
 bot.endConversationAction('goodbye', 'Goodbye :)', { matches: /^goodbye/i });
 bot.beginDialogAction('help', '/help', { matches: /^help/i });
+bot.beginDialogAction('hello', '/hello', { matches: /^(hello|hi|whats up|good afternoon|good morning|good evening|hey|morning|afternon|evening)/i });
 
 //=========================================================
 // Bots Dialogs
 //=========================================================
+bot.dialog('/hello', [
+    function (session) {
+        var card = new builder.HeroCard(session)
+            .title("Hello mate, long time no talk.")
+            .text("Where do you want to go?")
+            .images([
+                 builder.CardImage.create(session, "https://www.google.co.uk/url?sa=i&rct=j&q=&esrc=s&source=images&cd=&cad=rja&uact=8&ved=0ahUKEwiNlKLZwPbRAhVMnRQKHVBHBFUQjRwIBQ&url=https%3A%2F%2Fwww.theodysseyonline.com%2Fwanderlust-the-desire-travel&psig=AFQjCNF7zrAr16mUOqKVeGFW6wgMFCdBVQ&ust=1486299890533843")
+            ]);
+        var msg = new builder.Message(session).attachments([card]);
+        session.send(msg);
+        session.send("");
+        session.beginDialog('/travel');
+    },
+    function (session, results) {
+        // Display menu
+        session.beginDialog('/travelmenu');
+    },
+    function (session, results) {
+        // Always say goodbye
+        session.send("Ok... Bye bye!");
+    }
+]);
 
 bot.dialog('/', [
     function (session) {
@@ -248,7 +271,7 @@ bot.dialog('/carousel', [
                         builder.CardImage.create(session, "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/Seattlenighttimequeenanne.jpg/320px-Seattlenighttimequeenanne.jpg")
                             .tap(builder.CardAction.showImage(session, "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/Seattlenighttimequeenanne.jpg/800px-Seattlenighttimequeenanne.jpg")),
                     ])
-                    .buttons([
+                    .buttons([  
                         builder.CardAction.openUrl(session, "https://en.wikipedia.org/wiki/Space_Needle", "Wikipedia"),
                         builder.CardAction.imBack(session, "select:100", "Select")
                     ]),
