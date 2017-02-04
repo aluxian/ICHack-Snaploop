@@ -59,6 +59,26 @@ bot.dialog('/', [
 
 bot.dialog('/plantrip', [
   function (session) {
-    session.send("Hi! I can find awesome trips for you. Where do you want to go?");
-  }
+        builder.Prompts.text(session, "I can find awesome trips for you.\nWhere do you want to go?");
+    },
+    function (session, results) {
+        session.userData.where = results.response;
+        session.send('Hello ' + 'session.userData.name' + '\nI will find you some trips to ' + session.userData.where);
+        session.beginDialog('/tripbuttons');
+    }
 ]);
+
+bot.dialog('/tripbuttons', [
+    function (session) {
+        builder.Prompts.choice(session, "What kind of travel are you looking for?", "camping|luxury|roadtrip|(quit)");
+    },
+    function (session, results) {
+        if (results.response && results.response.entity != '(quit)') {
+            // Launch demo dialog
+            session.send('Great, lemme find you something!')
+        } else {
+            // Exit the menu
+            session.endDialog();
+        }
+    }
+])
