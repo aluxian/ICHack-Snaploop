@@ -5,27 +5,27 @@ var builder = require('botbuilder');
 // Bot Setup
 //=========================================================
 
-// // Setup Restify Server
-// var server = restify.createServer();
-// server.listen(process.env.port || process.env.PORT || 3978, function () {
-//   console.log('%s listening to %s', server.name, server.url);
-// });
-//
-// // Create chat bot
-// var connector = new builder.ChatConnector({
-//   appId: process.env.MICROSOFT_APP_ID,
-//   appPassword: process.env.MICROSOFT_APP_PASSWORD
-// });
-// var bot = new builder.UniversalBot(connector);
-// server.post('/api/messages', connector.listen());
+// Setup Restify Server
+var server = restify.createServer();
+server.listen(process.env.port || process.env.PORT || 3978, function () {
+  console.log('%s listening to %s', server.name, server.url);
+});
+
+// Create chat bot
+var connector = new builder.ChatConnector({
+  appId: process.env.MICROSOFT_APP_ID,
+  appPassword: process.env.MICROSOFT_APP_PASSWORD
+});
+var bot = new builder.UniversalBot(connector);
+server.post('/api/messages', connector.listen());
 
 //=========================================================
 // Bot Setup CONSOLE
 //=========================================================
 
 // Create chat bot
-var connector = new builder.ConsoleConnector().listen();
-var bot = new builder.UniversalBot(connector);
+// var connector = new builder.ConsoleConnector().listen();
+// var bot = new builder.UniversalBot(connector);
 
 //=========================================================
 // Bots Middleware
@@ -38,9 +38,8 @@ bot.use(builder.Middleware.dialogVersion({ version: 1.0, resetCommand: /^reset/i
 // Bots Global Actions
 //=========================================================
 
-bot.endConversationAction('goodbye', 'Goodbye :)', { matches: /^good ?bye/i });
-bot.beginDialogAction('help', 'Good luck :)', { matches: /^he*lp/i });
-bot.beginDialogAction('hello', '/hello', { matches: /^(hello|hi|what'?s? up|good afternoon|good morning|good evening|hey|morning|afterno+n|evening)/i });
+// bot.endConversationAction('stop', 'Ok, let me know when you want to start again.', { matches: /^(stop|exit|close|off)/i });
+// bot.beginDialogAction('start', 'start', { matches: /^he*lp/i });
 
 //=========================================================
 // Bots Dialogs
@@ -48,37 +47,17 @@ bot.beginDialogAction('hello', '/hello', { matches: /^(hello|hi|what'?s? up|good
 
 bot.dialog('/', [
   function (session) {
-    var card = new builder.HeroCard(session)
-      .title("Travound")
-      .text("Find the best getaways for your budget");
-    var msg = new builder.Message(session).attachments([card]);
-    session.send(msg);
-    session.beginDialog('/plantrip');
+    session.send('Hey, let\'s play!');
+    session.beginDialog('/guess');
   },
 ]);
 
-bot.dialog('/plantrip', [
+bot.dialog('/guess', [
   function (session) {
-        builder.Prompts.text(session, "I can find awesome trips for you.\nWhere do you want to go?");
-    },
-    function (session, results) {
-        session.userData.where = results.response;
-        session.send('Hello ' + 'session.userData.name' + '\nI will find you some trips to ' + session.userData.where);
-        session.beginDialog('/tripbuttons');
-    }
+    builder.Prompts.attachment(session, 'Send me a photo that looks like: dice, jewellery, ring');
+  },
+  function (session, result) {
+    console.log('got response:', result);
+    var photoUrl = result.response[0].contentUrl;
+  },
 ]);
-
-bot.dialog('/tripbuttons', [
-    function (session) {
-        builder.Prompts.choice(session, "What kind of travel are you looking for?", "camping|luxury|roadtrip|(quit)");
-    },
-    function (session, results) {
-        if (results.response && results.response.entity != '(quit)') {
-            // Launch demo dialog
-            session.send('Great, lemme find you something!')
-        } else {
-            // Exit the menu
-            session.endDialog();
-        }
-    }
-])
