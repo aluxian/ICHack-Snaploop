@@ -1,7 +1,7 @@
 {
-  "name": "travound",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "snaploop",
+  "version": "0.1.0",
+  "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
@@ -10,7 +10,6 @@
     "clarifai": "2.1.2-dev",
     "humanize-duration": "3.10.0",
     "locale-emoji": "0.1.0",
-    "request": "^2.79.0",
     "restify": "4.3.0",
     "superagent": "3.4.1",
     "wordpos": "1.1.2"
