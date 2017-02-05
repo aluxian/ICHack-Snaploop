@@ -10,7 +10,7 @@ const async = require('async');
 // config
 const TAGS_DISPLAYED = 3;
 const TAGS_CONSIDERED = 5;
-const WRONG_GUESSES_THRESHOLD = 5;
+const WRONG_GUESSES_THRESHOLD = 4;
 const INACTIVE_SNAPPER_TIMEOUT = 45 * 1000; // 45s
 
 // create a POS classifier
@@ -200,7 +200,7 @@ bot.dialog('/guess', [
         STATE.snaps.final = {
           imageUrl: result.response[0].contentUrl,
           uid: session.message.address.user.id,
-          tags: STATE.currentTags,
+          tags: tags,
           sentAt: Date.now(),
         };
 
