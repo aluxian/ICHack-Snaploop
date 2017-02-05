@@ -298,8 +298,25 @@ bot.dialog('/guess', [
 
         // choose next random person
         setTimeout(function() {
-          const entry = randOf(getActivePlayers());
-          bot.beginDialog(entry[1], '/snap');
+          const [chosenId, chosenAddress] = randOf(getActivePlayers());
+
+          // start snapping dialog for the chosen one
+          bot.beginDialog(chosenAddress, '/snap');
+
+          // notify everyone else (excluding current user and the chosen one)
+          const chosenProfile = STATE.profiles[chosenId];
+          for (const [uid, address] of getActivePlayers({excl: session.message.address})) {
+            if (uid === chosenId) {
+              // exclude sender
+              console.log('exclude sender');
+              continue;
+            }
+
+            const msg = new builder.Message(session)
+              .address(address)
+              .text(chosenProfile.first_name + ' ' + localeEmoji(chosenProfile.locale) + ' is taking a snap... 📷');
+            bot.send(msg, function(err) { if (err) { console.error(err); } });
+          }
         }, 2 * 1000); // 2s
       };
 
@@ -423,7 +440,8 @@ function snapToHeroCard(session, snap) {
   return new builder.HeroCard(session)
     .title('Snapped by ' + STATE.profiles[snap.uid].first_name)
     .subtitle(displayTags(snap.tags))
-    .images([builder.CardImage.create(session, snap.imageUrl)]);
+    .images([builder.CardImage.create(session, snap.imageUrl)])
+    .tap(builder.CardAction.showImage(session, snap.imageUrl));
 }
 
 function getFbProfile(userId, cb) {
