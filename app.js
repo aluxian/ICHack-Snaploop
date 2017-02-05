@@ -10,8 +10,8 @@ const async = require('async');
 // config
 const TAGS_DISPLAYED = 3;
 const TAGS_CONSIDERED = 5;
-const WRONG_GUESSES_THRESHOLD = 3;
-const INACTIVE_SNAPPER_TIMEOUT = 30 * 1000; // 30s
+const WRONG_GUESSES_THRESHOLD = 5;
+const INACTIVE_SNAPPER_TIMEOUT = 45 * 1000; // 45s
 
 // create a POS classifier
 const wordpos = new WordPos();
@@ -163,7 +163,11 @@ bot.dialog('/guess', [
     } else if (STATE.playerTakingSnap) {
       // somebody else is taking a snap
       const snapperProfile = STATE.profiles[STATE.playerTakingSnap.user.id];
-      session.send(snapperProfile.first_name + ' ' + localeEmoji(snapperProfile.locale) + ' is taking a snap... 📷');
+      if (snapperProfile) {
+        session.send(snapperProfile.first_name + ' ' + localeEmoji(snapperProfile.locale) + ' is taking a snap... 📷');
+      } else {
+        session.send('Somebody else is taking a snap... 📷');
+      }
       session.endDialog();
     } else {
       // ask to send snap
@@ -205,17 +209,15 @@ bot.dialog('/guess', [
         const durationStr = humanizeDuration(durationInMs, {largest: 2, round: true, delimiter: ' and '});
 
         // notify the author of the snap
+        console.log('notifying author');
         const currentProfile = STATE.profiles[session.message.address.user.id];
         const currentGenderPron = currentProfile.gender === 'male' ? 'him' : 'her';
         const currentGenderPos = currentProfile.gender === 'male' ? 'his' : 'her';
 
-        const msgForAuthor1 = new builder.Message()
+        const msgForAuthor1 = new builder.Message(session)
           .address(STATE.currentSender)
           .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
             ' guessed your snap! It took ' + currentGenderPron + ' ' + durationStr + ' ⚡️');
-        const msgForAuthor2 = new builder.Message()
-          .address(STATE.currentSender)
-          .text('Now it\'s ' + currentGenderPos + ' turn to take a snap... 📷');
         const compareSnapsMsgToAuthor = new builder.Message(session)
           .address(STATE.currentSender)
           .attachmentLayout(builder.AttachmentLayout.carousel)
@@ -223,6 +225,9 @@ bot.dialog('/guess', [
             snapToHeroCard(session, STATE.snaps.original),
             snapToHeroCard(session, STATE.snaps.final),
           ]);
+        const msgForAuthor2 = new builder.Message(session)
+          .address(STATE.currentSender)
+          .text('Now it\'s ' + currentGenderPos + ' turn to take a snap... 📷');
 
         async.series([
           async.apply(bot.send.bind(bot), msgForAuthor1),
@@ -234,10 +239,12 @@ bot.dialog('/guess', [
         for (const [uid, address] of getActivePlayers({excl: session.message.address})) {
           if (uid === STATE.currentSender.user.id) {
             // exclude sender
-            return;
+            console.log('exclude sender');
+            continue;
           }
 
-          const msg1 = new builder.Message()
+          console.log('building messages');
+          const msg1 = new builder.Message(session)
             .address(address)
             .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
               ' guessed the current snap.' + ' It took ' + currentGenderPron + ' ' + durationStr + ' ⚡️');
@@ -248,7 +255,7 @@ bot.dialog('/guess', [
               snapToHeroCard(session, STATE.snaps.original),
               snapToHeroCard(session, STATE.snaps.final),
             ]);
-          const msg3 = new builder.Message()
+          const msg3 = new builder.Message(session)
             .address(address)
             .text('Hang on, now ' + currentProfile.first_name + ' ' +
               localeEmoji(currentProfile.locale) + ' has to send a snap 📷');
@@ -261,10 +268,12 @@ bot.dialog('/guess', [
         }
 
         // clear data
+        console.log('clearing currentTags and currentSender');
         STATE.currentTags = null;
         STATE.currentSender = null;
 
         // notify user
+        console.log('telling the user they guessed');
         session.send('You guessed, yay! 🎊');
         const compareSnapsMsg = new builder.Message(session)
           .attachmentLayout(builder.AttachmentLayout.carousel)
@@ -282,7 +291,7 @@ bot.dialog('/guess', [
         // notify everyone
         for (const [uid, address] of getActivePlayers()) {
           console.log('notifying', uid, 'that nobody won this round');
-          bot.send(new builder.Message()
+          bot.send(new builder.Message(session)
             .address(address)
             .text('Nobody won this round. I\'ll pick another player to take a snap...'));
         }
@@ -321,7 +330,7 @@ bot.dialog('/snap', [
   // main instruction
   function(session) {
     STATE.playerTakingSnap = session.message.address;
-    builder.Prompts.attachment(session, 'Use the Messenger camera to send me a photo 📷');
+    builder.Prompts.attachment(session, 'Use the Messenger camera to send a snap 📷');
   },
   // analyse the image
   function(session, result) {
