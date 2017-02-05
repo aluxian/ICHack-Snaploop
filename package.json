@@ -1,6 +1,6 @@
 {
   "name": "snaploop",
-  "version": "20.0.0",
+  "version": "0.1.0",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"

@@ -10,7 +10,7 @@ const async = require('async');
 // config
 const TAGS_DISPLAYED = 3;
 const TAGS_CONSIDERED = 5;
-const WRONG_GUESSES_THRESHOLD = 4;
+const WRONG_GUESSES_THRESHOLD = 6;
 const INACTIVE_SNAPPER_TIMEOUT = 45 * 1000; // 45s
 
 // create a POS classifier
@@ -51,7 +51,7 @@ const STATE = {
 };
 
 // install middleware
-bot.use(builder.Middleware.dialogVersion({ version: require('./package.json').version, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: 21.0, resetCommand: /^reset/i }));
 bot.use(storePlayerMiddleware());
 bot.use(storeLatestActivityMiddleware());
 bot.use(sendTypingMiddleware());
@@ -225,6 +225,9 @@ bot.dialog('/guess', [
             snapToHeroCard(session, STATE.snaps.original),
             snapToHeroCard(session, STATE.snaps.final),
           ]);
+        const leaderboardMsgForAuthor = new builder.Message(session)
+          .address(STATE.currentSender)
+          .text(generateLeaderboardMsg());
         const msgForAuthor2 = new builder.Message(session)
           .address(STATE.currentSender)
           .text('Now it\'s ' + currentGenderPos + ' turn to take a snap... 📷');
@@ -232,6 +235,7 @@ bot.dialog('/guess', [
         async.series([
           async.apply(bot.send.bind(bot), msgForAuthor1),
           async.apply(bot.send.bind(bot), compareSnapsMsgToAuthor),
+          async.apply(bot.send.bind(bot), leaderboardMsgForAuthor),
           async.apply(bot.send.bind(bot), msgForAuthor2),
         ], function(err) { if (err) { console.error(err); } });
 
@@ -257,6 +261,9 @@ bot.dialog('/guess', [
             ]);
           const msg3 = new builder.Message(session)
             .address(address)
+            .text(generateLeaderboardMsg());
+          const msg4 = new builder.Message(session)
+            .address(address)
             .text('Hang on, now ' + currentProfile.first_name + ' ' +
               localeEmoji(currentProfile.locale) + ' has to send a snap 📷');
 
@@ -264,6 +271,7 @@ bot.dialog('/guess', [
             async.apply(bot.send.bind(bot), msg1),
             async.apply(bot.send.bind(bot), msg2),
             async.apply(bot.send.bind(bot), msg3),
+            async.apply(bot.send.bind(bot), msg4),
           ], function(err) { if (err) { console.error(err); } });
         }
 
@@ -271,6 +279,13 @@ bot.dialog('/guess', [
         console.log('clearing currentTags and currentSender');
         STATE.currentTags = null;
         STATE.currentSender = null;
+
+        // update points
+        const newPoints = durationInMs < 30 * 1000 ? 2 : 1;
+        if (typeof currentProfile.points !== 'number') {
+          currentProfile.points = 0;
+        }
+        currentProfile.points += newPoints;
 
         // notify user
         console.log('telling the user they guessed');
@@ -282,7 +297,8 @@ bot.dialog('/guess', [
             snapToHeroCard(session, STATE.snaps.final),
           ]);
         session.send(compareSnapsMsg);
-        session.send('It took you ' + durationStr + ' ⚡️');
+        session.send('It took you ' + durationStr + ' ⚡️ (+' + newPoints + ' pts)');
+        session.send(generateLeaderboardMsg());
         session.replaceDialog('/snap');
       }
 
@@ -464,6 +480,39 @@ function getFbProfile(userId, cb) {
       fields: fields.join(','),
     })
     .end(cb);
+}
+
+function generateLeaderboardMsg() {
+  const entries = [];
+
+  // extract entries
+  for (const [uid] of getActivePlayers()) {
+    const profile = STATE.profiles[uid];
+    entries.push({
+      uid,
+      points: profile.points,
+      name: profile.first_name + ' ' + localeEmoji(profile.locale),
+    });
+  }
+
+  // sort by points (desc)
+  entries.sort(function(a, b) {
+    if (a.points < b.points) {
+      return -1;
+    } else if (a.points > b.points) {
+      return +1;
+    } else {
+      return 0;
+    }
+  });
+
+  // build the string
+  let str = '';
+  for (let i = 0; i < entries.length && i < 5; i++) {
+    str += (i + 1) + '. ' + entries[i].name + ' — ' + entries[i].points + ' pts';
+  }
+
+  return str;
 }
 
 function displayTags(tags) {
