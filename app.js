@@ -1,9 +1,14 @@
 const WordPos = require('wordpos');
 const Clarifai = require('clarifai');
 const humanizeDuration = require('humanize-duration');
+const localeEmoji = require('locale-emoji');
 const superagent = require('superagent');
 const builder = require('botbuilder');
 const restify = require('restify');
+
+// config
+const TAGS_DISPLAYED = 4;
+const TAGS_CONSIDERED = 6;
 
 // Create a POS classifier
 const wordpos = new WordPos();
@@ -29,7 +34,7 @@ const bot = new builder.UniversalBot(connector);
 server.post('/api/messages', connector.listen());
 
 // Anytime the major version is incremented any existing conversations will be restarted.
-bot.use(builder.Middleware.dialogVersion({ version: 10.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: 13.0, resetCommand: /^reset/i }));
 
 const STATE = {
   currentTags: null,
@@ -48,10 +53,11 @@ bot.dialog('/', [
 
     const contFlow = () => {
       const profile = STATE.profiles[session.message.address.user.id];
+      const playersCount = Object.entries(STATE.players).length - 1; // exclude the current player
       if (STATE.currentSender && STATE.currentSender.user.id === session.message.address.user.id) {
         // this user is the current sender
         session.send('Hang on, ' + profile.first_name + '. ' +
-          countOtherPlayers() + ' players are trying to guess your snap');
+          playersCount + ' players are trying to guess your snap 📷');
       } else {
         session.send('Hey, ' + profile.first_name + '! Let\'s play 🎮');
         session.beginDialog('/guess');
@@ -98,11 +104,12 @@ bot.dialog('/guess', [
       session.sendTyping();
       session.sendBatch();
       const senderProfile = STATE.profiles[STATE.currentSender.user.id];
-      session.send(senderProfile.first_name + ' took a snap that looks like: ' + displayTags(STATE.currentTags));
-      builder.Prompts.attachment(session, 'Can you guess what it is? 　');
+      session.send(senderProfile.first_name + ' ' + localeEmoji(senderProfile.locale) +
+        ' took a snap that looks like: ' + displayTags(STATE.currentTags));
+      builder.Prompts.attachment(session, 'Can you guess what it is? Take a similar snap 🔎');
     } else if (STATE.playerTakingSnap) { // somebody else is taking a snap
       const profile = STATE.profiles[STATE.playerTakingSnap.user.id];
-      session.send('Please wait, ' + profile.first_name + ' is taking a snap 📷');
+      session.send('Please wait, ' + profile.first_name + ' ' + localeEmoji(profile.locale) + ' is taking a snap 📷');
     } else {
       // ask to send snap
       session.replaceDialog('/guessed');
@@ -132,8 +139,8 @@ bot.dialog('/guess', [
                 const genderPron = currentProfile.gender === 'male' ? 'him' : 'her';
                 const msg = new builder.Message()
                   .address(STATE.currentSender)
-                  .text(currentProfile.first_name + ' guessed your snap! It took ' +
-                    genderPron + ' ' + durationStr + ' ⚡️');
+                  .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
+                    ' guessed your snap! It took ' + genderPron + ' ' + durationStr + ' ⚡️');
                 bot.send(msg, function(err) { if (err) { console.error(err); } });
 
                 // notify everyone else
@@ -141,11 +148,12 @@ bot.dialog('/guess', [
                   if (uid !== session.message.address.user.id && uid !== STATE.currentSender.user.id) {
                     const msg1 = new builder.Message()
                       .address(address)
-                      .text(currentProfile.first_name + ' guessed the current snap.' +
-                        ' It took ' + genderPron + ' ' + durationStr + ' ⚡️');
+                      .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
+                        ' guessed the current snap.' + ' It took ' + genderPron + ' ' + durationStr + ' ⚡️');
                     const msg2 = new builder.Message()
                       .address(address)
-                      .text('Hang on, now ' + currentProfile.first_name + ' has to send a snap 📷');
+                      .text('Hang on, now ' + currentProfile.first_name + ' ' +
+                        localeEmoji(currentProfile.locale) + ' has to send a snap 📷');
                     bot.send(msg1, function(err) {
                       if (err) {
                         console.error(err);
@@ -176,7 +184,7 @@ bot.dialog('/guess', [
               }
 
               if (numMatches < 1) {
-                session.send('No, that\'s not it ' + randOf(['　', '　', '　', '　']));
+                session.send('No, that\'s not it ' + randOf(['😞', '😔', '😟', '😕', '☹️', '🙁']));
                 session.replaceDialog('/guess');
               }
             }
@@ -199,7 +207,7 @@ bot.dialog('/guessed', [
     STATE.playerTakingSnap = session.message.address;
     session.sendTyping();
     session.sendBatch();
-    session.send('Now it\'s your turn to take a snap. I\'ll ask ' + countOtherPlayers() + ' players to guess!');
+    session.send('Now it\'s your turn to take a snap. I\'ll ask the other players to guess it!');
     builder.Prompts.attachment(session, 'Use the Messenger camera to send me a photo 📷');
   },
   function(session, result) {
@@ -252,7 +260,7 @@ bot.dialog('/guessed', [
       session.endDialog();
     } else {
       // no
-      session.send('Ok. Let\'s try again.');
+      session.send('Ok. Let\'s try again 👍');
       session.replaceDialog('/guessed');
     }
   },
@@ -271,23 +279,23 @@ function processConcepts(concepts) {
       return tagIsNounPairs
         .filter((pair) => pair[1])
         .map((pair) => pair[0])
-        .slice(0, 7);
+        .slice(0, TAGS_CONSIDERED);
     });
 }
 
 // prepare for display
 function displayTags(tags) {
-  const removedTags = ['no person'];
+  const excludedTags = ['no person'];
   const newTags = [];
 
   // filter
   for (const tag of tags) {
-    if (!removedTags.includes(tag)) {
+    if (!excludedTags.includes(tag)) {
       newTags.push(tag);
     }
   }
 
-  return newTags.slice(0, 5).join(', ');
+  return newTags.slice(0, TAGS_DISPLAYED).join(', ');
 }
 
 function tagMatches(arr1, arr2) {
@@ -305,10 +313,6 @@ function tagMatches(arr1, arr2) {
   }
 
   return numMatches;
-}
-
-function countOtherPlayers() {
-  return Object.entries(STATE.players).length - 1; // exclude the current player
 }
 
 function getRandomInt(min, max) {

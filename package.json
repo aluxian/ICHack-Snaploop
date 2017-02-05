@@ -9,6 +9,7 @@
     "botbuilder": "3.6.0",
     "clarifai": "2.1.2-dev",
     "humanize-duration": "3.10.0",
+    "locale-emoji": "0.1.0",
     "request": "^2.79.0",
     "restify": "4.3.0",
     "superagent": "3.4.1",
