@@ -301,17 +301,16 @@ bot.dialog('/guess', [
           const [chosenId, chosenAddress] = randOf(getActivePlayers());
 
           // start snapping dialog for the chosen one
+          bot.send(
+            new builder.Message(session).text('You\'re the chosen one! 🍀'),
+            function(err) { if (err) { console.error(err); } },
+          );
           bot.beginDialog(chosenAddress, '/snap');
 
           // notify everyone else (excluding current user and the chosen one)
           const chosenProfile = STATE.profiles[chosenId];
-          for (const [uid, address] of getActivePlayers({excl: session.message.address})) {
-            if (uid === chosenId) {
-              // exclude sender
-              console.log('exclude sender');
-              continue;
-            }
-
+          for (const [uid, address] of getActivePlayers({excl: chosenAddress})) {
+            console.log('announcing', uid, 'about who is next (randomly chosen)');
             const msg = new builder.Message(session)
               .address(address)
               .text(chosenProfile.first_name + ' ' + localeEmoji(chosenProfile.locale) + ' is taking a snap... 📷');
@@ -403,6 +402,7 @@ bot.dialog('/snap', [
       // notify the snapper
       const extraPl = playersCount === 1 ? '' : 's';
       session.send('Awesome! I sent that to ' + playersCount + ' player' + extraPl);
+      session.send('I\'ll let you know when they guess 😉');
       session.endDialog();
     } else { // no
       session.send('Ok. Let\'s try again 👍');
