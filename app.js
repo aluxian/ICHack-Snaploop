@@ -359,7 +359,7 @@ bot.dialog('/guess', [
         }
       };
 
-      handleCloseMatch(2, 'You\'re very close! 🔥🔥🔥');
+      handleCloseMatch(2, 'No, but you\'re very close! 🔥🔥🔥');
       handleCloseMatch(1, 'No, but you\'re close 🔥🔥');
       handleCloseMatch(0, 'No, that\'s not it ' + randOf(['😞', '😔', '😟', '😕', '☹️', '🙁']));
     });
