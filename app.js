@@ -112,7 +112,7 @@ bot.dialog('/guess', [
       builder.Prompts.attachment(session, 'Can you guess what it is? Take a similar snap 🔎');
     } else if (STATE.playerTakingSnap) { // somebody else is taking a snap
       const profile = STATE.profiles[STATE.playerTakingSnap.user.id];
-      session.send('Please wait, ' + profile.first_name + ' ' + localeEmoji(profile.locale) + ' is taking a snap 📷');
+      session.send(profile.first_name + ' ' + localeEmoji(profile.locale) + ' is taking a snap... 📷');
     } else {
       // ask to send snap
       session.replaceDialog('/guessed');
