@@ -5,10 +5,11 @@ const localeEmoji = require('locale-emoji');
 const superagent = require('superagent');
 const builder = require('botbuilder');
 const restify = require('restify');
+const async = require('async');
 
 // config
-const TAGS_DISPLAYED = 4;
-const TAGS_CONSIDERED = 6;
+const TAGS_DISPLAYED = 3;
+const TAGS_CONSIDERED = 5;
 
 // Create a POS classifier
 const wordpos = new WordPos();
@@ -34,13 +35,15 @@ const bot = new builder.UniversalBot(connector);
 server.post('/api/messages', connector.listen());
 
 // Anytime the major version is incremented any existing conversations will be restarted.
-bot.use(builder.Middleware.dialogVersion({ version: 13.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: 15.0, resetCommand: /^reset/i }));
 
+let playerTakingSnapTimeoutId = null;
 const STATE = {
   currentTags: null,
   currentSender: null,
   playerTakingSnap: null,
   gameStartedAt: null,
+  snaps: [],
   players: {},
   profiles: {},
 };
@@ -123,6 +126,8 @@ bot.dialog('/guess', [
       function(response) {
         processConcepts(response.outputs[0].data.concepts)
           .then((tags) => {
+            console.log('tags from clarifai:', tags);
+
             if (!tags.length) {
               session.send('Sorry, I could not identify anything in your snap. Try again 🙏');
               session.replaceDialog('/guess');
@@ -131,17 +136,49 @@ bot.dialog('/guess', [
 
               // guessed
               if (numMatches >= 3) {
+                STATE.snaps.push({
+                  imageUrl: result.response[0].contentUrl,
+                  uid: session.message.address.user.id,
+                  tags: STATE.currentTags,
+                  sentAt: new Date(),
+                });
+
+                // calculate how long it took to guess
                 const durationInMs = new Date().getTime() - STATE.gameStartedAt.getTime();
                 const durationStr = humanizeDuration(durationInMs, {largest: 2, round: true, delimiter: ' and '});
 
                 // notify the author of the pic
                 const currentProfile = STATE.profiles[session.message.address.user.id];
                 const genderPron = currentProfile.gender === 'male' ? 'him' : 'her';
-                const msg = new builder.Message()
+
+                const msgForAuthor = new builder.Message()
                   .address(STATE.currentSender)
                   .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
                     ' guessed your snap! It took ' + genderPron + ' ' + durationStr + ' ⚡️');
-                bot.send(msg, function(err) { if (err) { console.error(err); } });
+
+                const card1 = STATE.snaps[STATE.snaps.length - 2];
+                const card2 = STATE.snaps[STATE.snaps.length - 1];
+
+                const compareSnapsMsgToAuthor = new builder.Message(session)
+                  .address(STATE.currentSender)
+                  .attachmentLayout(builder.AttachmentLayout.carousel)
+                  .attachments([
+                    new builder.HeroCard(session)
+                      .title('Snapped by ' + STATE.profiles[card1.uid].first_name)
+                      .subtitle(displayTags(card1.tags))
+                      .images([builder.CardImage.create(session, card1.imageUrl)
+                        .tap(builder.CardAction.showImage(session, card1.imageUrl))]),
+                    new builder.HeroCard(session)
+                      .title('Snapped by ' + STATE.profiles[card2.uid].first_name)
+                      .subtitle(displayTags(card2.tags))
+                      .images([builder.CardImage.create(session, card2.imageUrl)
+                        .tap(builder.CardAction.showImage(session, card2.imageUrl))]),
+                  ]);
+
+                async.series([
+                  async.apply(bot.send.bind(bot), msgForAuthor),
+                  async.apply(bot.send.bind(bot), compareSnapsMsgToAuthor),
+                ], function(err) { if (err) { console.error(err); } });
 
                 // notify everyone else
                 for (const [uid, address] of Object.entries(STATE.players)) {
@@ -150,17 +187,33 @@ bot.dialog('/guess', [
                       .address(address)
                       .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
                         ' guessed the current snap.' + ' It took ' + genderPron + ' ' + durationStr + ' ⚡️');
-                    const msg2 = new builder.Message()
+
+                    const msg2 = new builder.Message(session)
+                      .address(address)
+                      .attachmentLayout(builder.AttachmentLayout.carousel)
+                      .attachments([
+                        new builder.HeroCard(session)
+                          .title('Snapped by ' + STATE.profiles[card1.uid].first_name)
+                          .subtitle(displayTags(card1.tags))
+                          .images([builder.CardImage.create(session, card1.imageUrl)
+                            .tap(builder.CardAction.showImage(session, card1.imageUrl))]),
+                        new builder.HeroCard(session)
+                          .title('Snapped by ' + STATE.profiles[card2.uid].first_name)
+                          .subtitle(displayTags(card2.tags))
+                          .images([builder.CardImage.create(session, card2.imageUrl)
+                            .tap(builder.CardAction.showImage(session, card2.imageUrl))]),
+                      ]);
+
+                    const msg3 = new builder.Message()
                       .address(address)
                       .text('Hang on, now ' + currentProfile.first_name + ' ' +
                         localeEmoji(currentProfile.locale) + ' has to send a snap 📷');
-                    bot.send(msg1, function(err) {
-                      if (err) {
-                        console.error(err);
-                      }
 
-                      bot.send(msg2, function(err) { if (err) { console.error(err); } });
-                    });
+                    async.series([
+                      async.apply(bot.send.bind(bot), msg1),
+                      async.apply(bot.send.bind(bot), msg2),
+                      async.apply(bot.send.bind(bot), msg3),
+                    ], function(err) { if (err) { console.error(err); } });
                   }
                 }
 
@@ -169,6 +222,21 @@ bot.dialog('/guess', [
                 STATE.gameStartedAt = null;
 
                 session.send('You guessed, yay! 🎊');
+                const compareSnapsMsg = new builder.Message(session)
+                  .attachmentLayout(builder.AttachmentLayout.carousel)
+                  .attachments([
+                    new builder.HeroCard(session)
+                      .title('Snapped by ' + STATE.profiles[card1.uid].first_name)
+                      .subtitle(displayTags(card1.tags))
+                      .images([builder.CardImage.create(session, card1.imageUrl)
+                        .tap(builder.CardAction.showImage(session, card1.imageUrl))]),
+                    new builder.HeroCard(session)
+                      .title('Snapped by ' + STATE.profiles[card2.uid].first_name)
+                      .subtitle(displayTags(card2.tags))
+                      .images([builder.CardImage.create(session, card2.imageUrl)
+                        .tap(builder.CardAction.showImage(session, card2.imageUrl))]),
+                  ]);
+                session.send(compareSnapsMsg);
                 session.send('It took you ' + durationStr + ' ⚡️');
                 session.replaceDialog('/guessed');
               }
@@ -205,6 +273,39 @@ bot.dialog('/guess', [
 bot.dialog('/guessed', [
   function(session) {
     STATE.playerTakingSnap = session.message.address;
+
+    clearTimeout(playerTakingSnapTimeoutId);
+    playerTakingSnapTimeoutId = setTimeout(function() {
+      STATE.playerTakingSnap = null;
+      session.send('Ops! You lost your turn. Next time, snap faster 💫');
+
+      // announce the others about this user's failure
+      const currentProfile = STATE.profiles[session.message.address.user.id];
+      const genderPos = currentProfile.gender === 'male' ? 'his' : 'her';
+      for (const [uid, address] of Object.entries(STATE.players)) {
+        if (uid !== session.message.address.user.id) {
+          const msg1 = new builder.Message()
+            .address(address)
+            .text('Oh, no! ' + currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
+              ' lost ' + genderPos + ' turn');
+
+          async.series([
+            async.apply(bot.send.bind(bot), msg1),
+          ], function(err) {
+            if (err) {
+              console.error(err);
+            }
+            bot.beginDialog(address, '/guess');
+          });
+        }
+      }
+
+      // delay switch
+      setTimeout(function() {
+        session.replaceDialog('/guess');
+      }, 1000);
+    }, 2 * 60 * 1000); // 2 mins
+
     session.sendTyping();
     session.sendBatch();
     session.send('Now it\'s your turn to take a snap. I\'ll ask the other players to guess it!');
@@ -217,11 +318,14 @@ bot.dialog('/guessed', [
       function(response) {
         processConcepts(response.outputs[0].data.concepts)
           .then((tags) => {
+            console.log('tags from clarifai:', tags);
+
             if (!tags.length) {
               session.send('Sorry, I could not identify anything in your snap. Try again 🙏');
               session.replaceDialog('/guessed');
             } else {
-              STATE.currentTags = tags;
+              session.userData.currentTags = tags;
+              session.userData.imageUrl = result.response[0].contentUrl;
               session.send('I see: ' + displayTags(tags));
               builder.Prompts.choice(session, 'Is that correct?', ['Yes ✅', 'No ❌']);
             }
@@ -242,6 +346,17 @@ bot.dialog('/guessed', [
       // yes
       session.sendTyping();
       session.sendBatch();
+
+      // clear sender inactivity timeout
+      clearTimeout(playerTakingSnapTimeoutId);
+
+      STATE.currentTags = session.userData.currentTags;
+      STATE.snaps.push({
+        imageUrl: session.userData.imageUrl,
+        uid: session.message.address.user.id,
+        tags: session.userData.currentTags,
+        sentAt: new Date(),
+      });
 
       STATE.playerTakingSnap = null;
       STATE.currentSender = session.message.address;
