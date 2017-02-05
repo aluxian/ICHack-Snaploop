@@ -490,7 +490,7 @@ function generateLeaderboardMsg() {
     const profile = STATE.profiles[uid];
     entries.push({
       uid,
-      points: profile.points,
+      points: profile.points || 0,
       name: profile.first_name + ' ' + localeEmoji(profile.locale),
     });
   }
@@ -498,9 +498,9 @@ function generateLeaderboardMsg() {
   // sort by points (desc)
   entries.sort(function(a, b) {
     if (a.points < b.points) {
-      return -1;
-    } else if (a.points > b.points) {
       return +1;
+    } else if (a.points > b.points) {
+      return -1;
     } else {
       return 0;
     }
@@ -509,7 +509,7 @@ function generateLeaderboardMsg() {
   // build the string
   let str = '';
   for (let i = 0; i < entries.length && i < 5; i++) {
-    str += (i + 1) + '. ' + entries[i].name + ' — ' + entries[i].points + ' pts';
+    str += (i + 1) + '. ' + entries[i].name + ' — ' + entries[i].points + ' pts\n';
   }
 
   return str;
