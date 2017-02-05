@@ -208,6 +208,16 @@ bot.dialog('/guess', [
         const durationInMs = Date.now() - STATE.snaps.original.sentAt;
         const durationStr = humanizeDuration(durationInMs, {largest: 2, round: true, delimiter: ' and '});
 
+        // update points
+        let newPoints = numMatches;
+        if (durationInMs < 30 * 1000) {
+          newPoints *= 2;
+        }
+        if (typeof currentProfile.points !== 'number') {
+          currentProfile.points = 0;
+        }
+        currentProfile.points += newPoints;
+
         // notify the author of the snap
         console.log('notifying author');
         const currentProfile = STATE.profiles[session.message.address.user.id];
@@ -279,13 +289,6 @@ bot.dialog('/guess', [
         console.log('clearing currentTags and currentSender');
         STATE.currentTags = null;
         STATE.currentSender = null;
-
-        // update points
-        const newPoints = durationInMs < 30 * 1000 ? 2 : 1;
-        if (typeof currentProfile.points !== 'number') {
-          currentProfile.points = 0;
-        }
-        currentProfile.points += newPoints;
 
         // notify user
         console.log('telling the user they guessed');
