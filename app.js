@@ -303,7 +303,7 @@ bot.dialog('/guess', [
           // start snapping dialog for the chosen one
           bot.send(
             new builder.Message(session).text('You\'re the chosen one! 🍀'),
-            function(err) { if (err) { console.error(err); } },
+            function(err) { if (err) { console.error(err); } }
           );
           bot.beginDialog(chosenAddress, '/snap');
 
