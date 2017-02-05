@@ -10,6 +10,8 @@ const async = require('async');
 // config
 const TAGS_DISPLAYED = 3;
 const TAGS_CONSIDERED = 5;
+const WRONG_GUESSES_THRESHOLD = 3;
+const INACTIVE_SNAPPER_TIMEOUT = 30 * 1000; // 30s
 
 // Create a POS classifier
 const wordpos = new WordPos();
@@ -35,9 +37,12 @@ const bot = new builder.UniversalBot(connector);
 server.post('/api/messages', connector.listen());
 
 // Anytime the major version is incremented any existing conversations will be restarted.
-bot.use(builder.Middleware.dialogVersion({ version: 15.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: 17.0, resetCommand: /^reset/i }));
 
+// state
 let playerTakingSnapTimeoutId = null;
+let wrongGuesses = 0;
+
 const STATE = {
   currentTags: null,
   currentSender: null,
@@ -51,18 +56,28 @@ const STATE = {
 bot.dialog('/', [
   function(session) {
     STATE.players[session.message.address.user.id] = session.message.address;
+
     session.sendTyping();
     session.sendBatch();
 
     const contFlow = () => {
       const profile = STATE.profiles[session.message.address.user.id];
       const playersCount = Object.entries(STATE.players).length - 1; // exclude the current player
+
+      // update lastActiveAt
+      STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
+
       if (STATE.currentSender && STATE.currentSender.user.id === session.message.address.user.id) {
         // this user is the current sender
         session.send('Hang on, ' + profile.first_name + '. ' +
           playersCount + ' players are trying to guess your snap 📷');
       } else {
         session.send('Hey, ' + profile.first_name + '! Let\'s play 🎮');
+        if (!profile.hasLearnedIntro) {
+          session.send('You\'ll receive an object description. Guess it by snapping a similar pic.' +
+            'If you guess, you get to send the snap for others to guess! ☺️');
+          profile.hasLearnedIntro = true;
+        }
         session.beginDialog('/guess');
       }
     };
@@ -93,7 +108,9 @@ bot.dialog('/', [
             console.error(err);
             session.send('Error 🚨');
           } else {
-            STATE.profiles[session.message.address.user.id] = res.body;
+            // copy values into profile object
+            STATE.profiles[session.message.address.user.id] = STATE.profiles[session.message.address.user.id] || {};
+            Object.assign(STATE.profiles[session.message.address.user.id], res.body);
             contFlow();
           }
         });
@@ -103,6 +120,9 @@ bot.dialog('/', [
 
 bot.dialog('/guess', [
   function(session) {
+    // update lastActiveAt
+    STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
+
     if (STATE.currentTags && STATE.currentSender) { // game in progress
       session.sendTyping();
       session.sendBatch();
@@ -115,12 +135,15 @@ bot.dialog('/guess', [
       session.send(profile.first_name + ' ' + localeEmoji(profile.locale) + ' is taking a snap... 📷');
     } else {
       // ask to send snap
-      session.replaceDialog('/guessed');
+      session.replaceDialog('/snap');
     }
   },
   function(session, result) {
     session.sendTyping();
     session.sendBatch();
+
+    // update lastActiveAt
+    STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
 
     clarifai.models.predict(Clarifai.GENERAL_MODEL, result.response[0].contentUrl).then(
       function(response) {
@@ -140,11 +163,11 @@ bot.dialog('/guess', [
                   imageUrl: result.response[0].contentUrl,
                   uid: session.message.address.user.id,
                   tags: STATE.currentTags,
-                  sentAt: new Date(),
+                  sentAt: Date.now(),
                 });
 
                 // calculate how long it took to guess
-                const durationInMs = new Date().getTime() - STATE.gameStartedAt.getTime();
+                const durationInMs = Date.now() - STATE.gameStartedAt;
                 const durationStr = humanizeDuration(durationInMs, {largest: 2, round: true, delimiter: ' and '});
 
                 // notify the author of the pic
@@ -238,22 +261,51 @@ bot.dialog('/guess', [
                   ]);
                 session.send(compareSnapsMsg);
                 session.send('It took you ' + durationStr + ' ⚡️');
-                session.replaceDialog('/guessed');
+                session.replaceDialog('/snap');
               }
+
+              // choose another player, randomly
+              const chooseAnotherPlayer = () => {
+                // notify everyone
+                for (const address of Object.values(STATE.players)) {
+                  const msg = new builder.Message()
+                    .address(address)
+                    .text('Nobody won this round. I\'ll pick another player to take a snap...');
+                  bot.send(msg);
+                }
+
+                const uid = randOf(Object.keys(STATE.players));
+                bot.beginDialog(STATE.players[uid], '/snap');
+              };
 
               if (numMatches === 2) {
                 session.send('You\'re very close! 🔥🔥🔥');
-                session.replaceDialog('/guess');
+                wrongGuesses++;
+                if (wrongGuesses >= WRONG_GUESSES_THRESHOLD) {
+                  chooseAnotherPlayer();
+                } else {
+                  session.replaceDialog('/guess');
+                }
               }
 
               if (numMatches === 1) {
                 session.send('No, but you\'re close 🔥🔥');
-                session.replaceDialog('/guess');
+                wrongGuesses++;
+                if (wrongGuesses >= WRONG_GUESSES_THRESHOLD) {
+                  chooseAnotherPlayer();
+                } else {
+                  session.replaceDialog('/guess');
+                }
               }
 
               if (numMatches < 1) {
                 session.send('No, that\'s not it ' + randOf(['😞', '😔', '😟', '😕', '☹️', '🙁']));
-                session.replaceDialog('/guess');
+                wrongGuesses++;
+                if (wrongGuesses >= WRONG_GUESSES_THRESHOLD) {
+                  chooseAnotherPlayer();
+                } else {
+                  session.replaceDialog('/guess');
+                }
               }
             }
           })
@@ -270,41 +322,61 @@ bot.dialog('/guess', [
   },
 ]);
 
-bot.dialog('/guessed', [
+bot.dialog('/snap', [
   function(session) {
     STATE.playerTakingSnap = session.message.address;
 
-    clearTimeout(playerTakingSnapTimeoutId);
-    playerTakingSnapTimeoutId = setTimeout(function() {
-      STATE.playerTakingSnap = null;
-      session.send('Ops! You lost your turn. Next time, snap faster 💫');
+    // update lastActiveAt
+    STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
 
-      // announce the others about this user's failure
-      const currentProfile = STATE.profiles[session.message.address.user.id];
-      const genderPos = currentProfile.gender === 'male' ? 'his' : 'her';
-      for (const [uid, address] of Object.entries(STATE.players)) {
-        if (uid !== session.message.address.user.id) {
-          const msg1 = new builder.Message()
-            .address(address)
-            .text('Oh, no! ' + currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
-              ' lost ' + genderPos + ' turn');
+    const setInactivityTimeout = () => {
+      clearTimeout(playerTakingSnapTimeoutId);
+      playerTakingSnapTimeoutId = setTimeout(function() {
+        const currentProfile = STATE.profiles[session.message.address.user.id];
+        const genderPos = currentProfile.gender === 'male' ? 'his' : 'her';
 
-          async.series([
-            async.apply(bot.send.bind(bot), msg1),
-          ], function(err) {
-            if (err) {
-              console.error(err);
-            }
-            bot.beginDialog(address, '/guess');
-          });
+        console.log('running timeout checker for', session.message.address.user.id);
+        console.log('last active:', Date.now() - currentProfile.lastActiveAt, 'ms ago');
+
+        // if the user has been active lately, don't time out
+        if (currentProfile.lastActiveAt && Date.now() - currentProfile.lastActiveAt < INACTIVE_SNAPPER_TIMEOUT) {
+          setInactivityTimeout();
+          return;
         }
-      }
 
-      // delay switch
-      setTimeout(function() {
-        session.replaceDialog('/guess');
-      }, 1000);
-    }, 2 * 60 * 1000); // 2 mins
+        console.log('player taking snap', STATE.playerTakingSnap, 'lost their turn');
+        const playerTakingSnap = STATE.playerTakingSnap;
+
+        STATE.playerTakingSnap = null;
+        session.send('Ops! You lost your turn. Next time, snap faster 💫');
+
+        // announce the others about this user's failure
+        for (const [uid, address] of Object.entries(STATE.players)) {
+          if (uid !== session.message.address.user.id) {
+            const msg1 = new builder.Message()
+              .address(address)
+              .text('Oh, no! ' + currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
+                ' lost ' + genderPos + ' turn');
+
+            async.series([
+              async.apply(bot.send.bind(bot), msg1),
+            ], function(err) {
+              if (err) {
+                console.error(err);
+              }
+              bot.beginDialog(address, '/guess');
+            });
+          }
+        }
+
+        // delay switch
+        setTimeout(function() {
+          bot.beginDialog(playerTakingSnap, '/guess');
+        }, 3000); // 3s
+      }, INACTIVE_SNAPPER_TIMEOUT);
+    };
+
+    setInactivityTimeout();
 
     session.sendTyping();
     session.sendBatch();
@@ -314,15 +386,29 @@ bot.dialog('/guessed', [
   function(session, result) {
     session.sendTyping();
     session.sendBatch();
+
+    // user is not snapping anymore
+    if (!STATE.playerTakingSnap) {
+      return;
+    }
+
+    // update lastActiveAt
+    STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
+
     clarifai.models.predict(Clarifai.GENERAL_MODEL, result.response[0].contentUrl).then(
       function(response) {
         processConcepts(response.outputs[0].data.concepts)
           .then((tags) => {
             console.log('tags from clarifai:', tags);
 
+            // user is not snapping anymore
+            if (!STATE.playerTakingSnap) {
+              return;
+            }
+
             if (!tags.length) {
               session.send('Sorry, I could not identify anything in your snap. Try again 🙏');
-              session.replaceDialog('/guessed');
+              session.replaceDialog('/snap');
             } else {
               session.userData.currentTags = tags;
               session.userData.imageUrl = result.response[0].contentUrl;
@@ -337,11 +423,20 @@ bot.dialog('/guessed', [
       function(err) {
         console.error(err);
         session.send('Error. Let\'s try again 🚨');
-        session.replaceDialog('/guessed');
+        session.replaceDialog('/snap');
       }
     );
   },
   function(session, result) {
+    // update lastActiveAt
+    STATE.profiles[session.message.user.id].lastActiveAt = Date.now();
+
+    // user is not snapping anymore
+    if (!STATE.playerTakingSnap) {
+      return;
+    }
+
+    // check response
     if (result.response.index === 0) {
       // yes
       session.sendTyping();
@@ -355,12 +450,12 @@ bot.dialog('/guessed', [
         imageUrl: session.userData.imageUrl,
         uid: session.message.address.user.id,
         tags: session.userData.currentTags,
-        sentAt: new Date(),
+        sentAt: Date.now(),
       });
 
       STATE.playerTakingSnap = null;
       STATE.currentSender = session.message.address;
-      STATE.gameStartedAt = new Date();
+      STATE.gameStartedAt = Date.now();
 
       // notify other players
       let playersCount = 0;
@@ -376,7 +471,7 @@ bot.dialog('/guessed', [
     } else {
       // no
       session.send('Ok. Let\'s try again 👍');
-      session.replaceDialog('/guessed');
+      session.replaceDialog('/snap');
     }
   },
 ]);
