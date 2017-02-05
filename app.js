@@ -322,7 +322,7 @@ bot.dialog('/guess', [
         setTimeout(function() {
           const [chosenId, chosenAddress] = randOf(getActivePlayers());
 
-          // start snapping dialog for the chosen one
+          // start the snapping dialog for the chosen one
           bot.send(
             new builder.Message(session)
               .address(chosenAddress)
