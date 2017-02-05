@@ -51,7 +51,7 @@ const STATE = {
 };
 
 // install middleware
-bot.use(builder.Middleware.dialogVersion({ version: 18.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({ version: require('./package.json').version, resetCommand: /^reset/i }));
 bot.use(storePlayerMiddleware());
 bot.use(storeLatestActivityMiddleware());
 bot.use(sendTypingMiddleware());
