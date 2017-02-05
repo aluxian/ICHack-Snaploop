@@ -51,7 +51,10 @@ const STATE = {
 };
 
 // install middleware
-bot.use(builder.Middleware.dialogVersion({ version: 21.0, resetCommand: /^reset/i }));
+bot.use(builder.Middleware.dialogVersion({
+  version: parseInt(require('./package.json').version, 10),
+  resetCommand: /^reset/i,
+}));
 bot.use(storePlayerMiddleware());
 bot.use(storeLatestActivityMiddleware());
 bot.use(sendTypingMiddleware());
@@ -196,6 +199,10 @@ bot.dialog('/guess', [
       console.log('tags that match:', numMatches);
 
       if (numMatches >= 3) {
+        const currentProfile = STATE.profiles[session.message.address.user.id];
+        const currentGenderPron = currentProfile.gender === 'male' ? 'him' : 'her';
+        const currentGenderPos = currentProfile.gender === 'male' ? 'his' : 'her';
+
         // save final image
         STATE.snaps.final = {
           imageUrl: result.response[0].contentUrl,
@@ -220,10 +227,6 @@ bot.dialog('/guess', [
 
         // notify the author of the snap
         console.log('notifying author');
-        const currentProfile = STATE.profiles[session.message.address.user.id];
-        const currentGenderPron = currentProfile.gender === 'male' ? 'him' : 'her';
-        const currentGenderPos = currentProfile.gender === 'male' ? 'his' : 'her';
-
         const msgForAuthor1 = new builder.Message(session)
           .address(STATE.currentSender)
           .text(currentProfile.first_name + ' ' + localeEmoji(currentProfile.locale) +
